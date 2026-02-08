@@ -1,0 +1,109 @@
+================================================================================
+ERC-20 Allowance Bypass Vulnerability - Proof of Concept Package
+================================================================================
+
+This package contains a complete, runnable Proof of Concept demonstrating the
+ERC-20 allowance bypass vulnerability where spenders can force token owners
+to pay extra fees beyond the approved allowance.
+
+================================================================================
+FILES INCLUDED
+================================================================================
+
+1. README.md
+   - Complete documentation
+   - Setup instructions
+   - Running instructions
+   - Expected output
+   - Safety statement
+
+2. SUBMISSION.md
+   - Quick start guide
+   - What the PoC demonstrates
+   - Test output example
+   - Verification steps
+   - Impact assessment
+
+3. foundry.toml
+   - Foundry configuration
+   - Solidity compiler settings
+   - Remappings for dependencies
+
+4. remappings.txt
+   - Import path remappings for OpenZeppelin and forge-std
+
+5. run-poc.sh
+   - Automated setup and execution script
+   - Installs dependencies
+   - Builds project
+   - Runs the PoC test
+
+6. src/VulnerableToken.sol
+   - Vulnerable token contract demonstrating the issue
+   - Implements fee mechanism without proper allowance checks
+   - DO NOT USE IN PRODUCTION
+
+7. test/AllowanceBypass.t.sol
+   - Main PoC test: test_transferFrom_exceedsApprovedAllowance()
+   - Demonstrates the vulnerability
+   - Includes comparison test showing correct behavior
+
+8. .gitignore
+   - Git ignore patterns for Foundry projects
+
+================================================================================
+QUICK START
+================================================================================
+
+1. Install dependencies:
+   forge install OpenZeppelin/openzeppelin-contracts --no-commit
+   forge install foundry-rs/forge-std --no-commit
+
+2. Run the PoC:
+   ./run-poc.sh
+   
+   OR
+   
+   forge test --match-test test_transferFrom_exceedsApprovedAllowance -vvv
+
+================================================================================
+WHAT IT PROVES
+================================================================================
+
+The PoC demonstrates that:
+- Alice approves 100 tokens to a spender
+- Spender calls transferFrom(100)
+- Alice loses MORE than 100 tokens (110 tokens: 100 + 10% fee)
+- The balance decrease (110) exceeds the approved allowance (100)
+- This violates ERC-20 standard expectations
+
+================================================================================
+SAFETY
+================================================================================
+
+✅ This PoC is completely safe:
+- Runs entirely in local Foundry environment
+- No interaction with live networks
+- Uses mock contracts and test addresses
+- No real funds at risk
+- All operations are isolated
+
+================================================================================
+EXPECTED TEST RESULT
+================================================================================
+
+The test should PASS, which confirms the vulnerability exists:
+- The test passes because it successfully demonstrates the issue
+- Assertion: balanceDecrease > approvedAmount should succeed
+- This proves the vulnerability is real and exploitable
+
+================================================================================
+REQUIREMENTS
+================================================================================
+
+- Foundry installed (https://book.getfoundry.sh)
+- No RPC endpoint needed (local only)
+- No private keys or credentials needed
+
+================================================================================
+
