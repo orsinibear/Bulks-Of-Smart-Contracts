@@ -3,57 +3,105 @@ from glider import *
 def query():
     """
     @title: Unauthorized Token Transfers - Missing Caller Verification in Payment Functions
-    @description: This vulnerability occurs when public/external payment functions transfer ERC-20 tokens using transferFrom without verifying that msg.sender is authorized to initiate transfers on behalf of the from address. This allows attackers to steal tokens from any user who has approved the contract.
-    @tags: access-control, unauthorized-transfer, erc20, payment-functions
+    @description: Detects public/external functions that call transferFrom without verifying msg.sender is authorized to initiate transfers on behalf of the from address. This allows attackers to steal tokens from any user who has approved the contract.
+    @severity: High
     @author: orsinibear
+    @tags: access-control, unauthorized-transfer, erc20, payment-functions, transferFrom
     @references: https://cwe.mitre.org/data/definitions/284.html, CWE-306, CWE-639
     """
     
-    # Find payment-related functions
-    payment_patterns = ["payWithERC20", "payWithToken", "payWith", "payERC20", "payToken"]
-    
-    # Get all public/external functions
-    targets = (
-        Functions()
-        .with_one_property([MethodProp.PUBLIC, MethodProp.EXTERNAL])
-        .exec(500)
-    )
-    
     results = []
     
-    for func in targets:
-        # Check if function name matches payment patterns
-        func_name_lower = func.name.lower()  # Changed from func.name() to func.name
-        is_payment_function = any(pattern.lower() in func_name_lower for pattern in payment_patterns)
-        
-        # Check if function calls transferFrom
-        source = func.source_code()
-        source_lower = source.lower()
-        calls_transferFrom = "transferfrom" in source_lower
-        
-        # Skip if not relevant
-        if not is_payment_function and not calls_transferFrom:
+    # Find functions that call transferFrom
+    functions = Functions().with_callee_names(["transferFrom"]).exec()
+    
+    for fn in functions:
+        # Filter for main contracts only
+        if not fn.get_contract().is_main():
             continue
         
-        # Check for access control patterns
-        has_msg_sender_check = False
+        # Must be public or external (accessible by anyone)
+        if not (fn.is_public() or fn.is_external()):
+            continue
         
-        # Look for msg.sender verification patterns
-        if "msg.sender" in source_lower or "_msgsender" in source_lower:
-            # Check if it's being compared/verified
-            if ("==" in source_lower or "require" in source_lower) and "msg.sender" in source_lower:
-                has_msg_sender_check = True
+        # Must actually call transferFrom
+        callee_names = [call.name for call in fn.callee_values()]
+        if "transferFrom" not in callee_names:
+            continue
         
-        # Check for modifiers (onlyOwner, etc.)
-        if "onlyowner" in source_lower or "onlyrole" in source_lower or "modifier" in source_lower:
-            has_msg_sender_check = True
+        # =============================================
+        # EXCLUDE SECURE PATTERNS (False Positives)
+        # =============================================
         
-        # Flag if calls transferFrom without proper authorization
-        if calls_transferFrom and not has_msg_sender_check:
-            results.append(func)
-            
-            # Limit results
-            if len(results) >= 20:
-                break
+        is_secure = False
+        
+        # Get function source code for pattern checking
+        try:
+            source = fn.source_code().lower()
+        except:
+            continue
+        
+        # Secure Pattern 1: Check for msg.sender verification
+        # Look for: msg.sender == fromAddress, require(msg.sender == ...), etc.
+        if "msg.sender" in source or "_msgsender" in source:
+            # Check if msg.sender is being compared/verified (not just used)
+            # Patterns: msg.sender ==, require(msg.sender ==, if (msg.sender ==, etc.
+            if ("==" in source and "msg.sender" in source) or \
+               ("require" in source and "msg.sender" in source) or \
+               ("if" in source and "msg.sender" in source and "==" in source):
+                is_secure = True
+        
+        # Secure Pattern 2: Access control modifiers
+        # Check for modifiers like onlyOwner, onlyRole, etc.
+        modifiers = fn.modifiers().exec()
+        if len(modifiers) > 0:
+            # Check modifier names for access control patterns
+            for mod in modifiers:
+                mod_name = mod.name.lower()
+                if any(pattern in mod_name for pattern in ["only", "owner", "role", "admin", "authorized"]):
+                    is_secure = True
+                    break
+        
+        # Secure Pattern 3: Check if transferFrom uses msg.sender as the from parameter
+        # If transferFrom(from=msg.sender, ...), it's secure
+        # Also check if function parameter "from" is compared to msg.sender
+        callee_values = fn.callee_values()
+        for call in callee_values:
+            if call.name == "transferFrom":
+                try:
+                    # Get arguments passed to transferFrom
+                    args = call.get_args()
+                    if len(args) >= 1:
+                        # First argument is typically the "from" address
+                        from_arg_expr = str(args[0].expression).lower()
+                        # Check if it's msg.sender or _msgSender()
+                        if "msg.sender" in from_arg_expr or "_msgsender" in from_arg_expr:
+                            is_secure = True
+                            break
+                        
+                        # Check if the from argument is a function parameter that's verified
+                        # Look for patterns where function has a "from" parameter and it's checked
+                        from_arg_str = str(args[0].expression)
+                        # If source contains comparison of this parameter with msg.sender
+                        if from_arg_str in source:
+                            # Check if there's a comparison pattern
+                            if f"{from_arg_str} == msg.sender" in source or \
+                               f"msg.sender == {from_arg_str}" in source or \
+                               f"require({from_arg_str} == msg.sender" in source or \
+                               f"require(msg.sender == {from_arg_str}" in source:
+                                is_secure = True
+                                break
+                except:
+                    pass
+        
+        # Secure Pattern 4: Internal/private functions are safe (already filtered, but double-check)
+        if fn.is_internal() or fn.is_private():
+            is_secure = True
+        
+        if is_secure:
+            continue
+        
+        # Only flag if we found transferFrom without proper authorization
+        results.append(fn)
     
     return results
